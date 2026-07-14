@@ -2,15 +2,27 @@ import { NobjcClass, NobjcObject, getPointer } from "objc-js";
 import type { ASAuthorizationController } from "objcjs-types/AuthenticationServices";
 import { NSDataFromBuffer } from "objcjs-types/nsdata";
 
-const getControllerState = new Map<string, Buffer>();
+interface GetControllerState {
+  clientDataHash: Buffer;
+  onConfigurationError: (error: unknown) => void;
+}
+
+const getControllerState = new Map<string, GetControllerState>();
 
 function getObjectPointerString(self: NobjcObject) {
   return getPointer(self).toString("base64");
 }
 
-export function setClientDataHash(self: NobjcObject, clientDataHash: Buffer) {
+export function setClientDataHash(
+  self: NobjcObject,
+  clientDataHash: Buffer,
+  onConfigurationError: (error: unknown) => void
+) {
   const selfPointer = getObjectPointerString(self);
-  getControllerState.set(selfPointer, clientDataHash);
+  getControllerState.set(selfPointer, {
+    clientDataHash,
+    onConfigurationError,
+  });
 }
 
 export function removeClientDataHash(self: NobjcObject) {
@@ -38,37 +50,37 @@ export const WebauthnGetController = NobjcClass.define({
         );
 
         const selfPointer = getObjectPointerString(self);
-        if (getControllerState.has(selfPointer)) {
-          const clientDataHash = getControllerState.get(selfPointer);
+        const state = getControllerState.get(selfPointer);
+        if (state) {
+          const { clientDataHash, onConfigurationError } = state;
 
-          const platformOptions =
-            context.platformKeyCredentialAssertionOptions();
-          if (platformOptions) {
-            platformOptions.setClientDataHash$(
-              NSDataFromBuffer(clientDataHash)
-            );
-            context.setPlatformKeyCredentialAssertionOptions$(
-              platformOptions.copyWithZone$(null)
-            );
-          }
+          try {
+            const platformOptions =
+              context.platformKeyCredentialAssertionOptions();
+            if (platformOptions) {
+              platformOptions.setClientDataHash$(
+                NSDataFromBuffer(clientDataHash)
+              );
+              context.setPlatformKeyCredentialAssertionOptions$(
+                platformOptions.copyWithZone$(null)
+              );
+            }
 
-          // Mirror on security-key options. The setters/write-back selectors are private;
-          // objc-js throws a capturable JS Error for an unrecognized selector instead of
-          // crashing, so a try/catch here degrades to platform-only behavior if missing.
-          const securityKeyOptions =
-            context.securityKeyCredentialAssertionOptions();
-          if (securityKeyOptions) {
-            try {
+            // Mirror on security-key options. These selectors are private, so fail the
+            // ceremony if either is unavailable rather than leaving an unpatched request
+            // active with a clientDataHash that does not match the returned clientDataJSON.
+            const securityKeyOptions =
+              context.securityKeyCredentialAssertionOptions();
+            if (securityKeyOptions) {
               securityKeyOptions.setClientDataHash$(
                 NSDataFromBuffer(clientDataHash)
               );
               context.setSecurityKeyCredentialAssertionOptions$(
                 securityKeyOptions.copyWithZone$(null)
               );
-            } catch {
-              // Security-key private setters unavailable on this OS - leave its options
-              // untouched rather than aborting the whole ceremony.
             }
+          } catch (error) {
+            onConfigurationError(error);
           }
         }
 

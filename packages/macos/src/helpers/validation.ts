@@ -17,19 +17,11 @@ interface AuthorizationErrorLike {
   message?: string;
   nativeCode?: number;
   nativeDomain?: string;
-  nativeTimeout?: boolean;
 }
 
 export function mapNativeAuthorizationError(
   error: AuthorizationErrorLike
-): "InvalidStateError" | "NotAllowedError" | "AbortError" {
-  // A self-initiated timeout cancellation (flagged by the internal handler before it
-  // calls authController.cancel()) maps to AbortError per the WebAuthn spec, distinct
-  // from a user-driven cancel which remains NotAllowedError.
-  if (error?.nativeTimeout) {
-    return "AbortError";
-  }
-
+): "InvalidStateError" | "NotAllowedError" {
   // Prefer NSError code/domain from authorizationController delegates (never localized).
   if (
     error?.nativeDomain === AUTHORIZATION_ERROR_DOMAIN &&

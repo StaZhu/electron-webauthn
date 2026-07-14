@@ -6,10 +6,15 @@ import { NSArrayFromObjects, NSStringFromString } from "objcjs-types/helpers";
 import { NSNumber } from "objcjs-types/Foundation";
 import { ASCPublicKeyCredentialDescriptor } from "../additional-objc/ASCPublicKeyCredentialDescriptor.js";
 
-const createControllerState = new Map<
-  string,
-  [Buffer, PublicKeyCredentialParams[], boolean, ExcludeCredential[]]
->();
+interface CreateControllerState {
+  clientDataHash: Buffer;
+  pubKeyCredParams: PublicKeyCredentialParams[];
+  residentKeyRequired: boolean;
+  excludeCredentials: ExcludeCredential[];
+  onConfigurationError: (error: unknown) => void;
+}
+
+const createControllerState = new Map<string, CreateControllerState>();
 
 function getObjectPointerString(self: NobjcObject) {
   return getPointer(self).toString("base64");
@@ -25,15 +30,17 @@ export function setControllerState(
   clientDataHash: Buffer,
   pubKeyCredParams: PublicKeyCredentialParams[],
   residentKeyRequired: boolean,
-  excludeCredentialIds: ExcludeCredential[]
+  excludeCredentials: ExcludeCredential[],
+  onConfigurationError: (error: unknown) => void
 ) {
   const selfPointer = getObjectPointerString(self);
-  createControllerState.set(selfPointer, [
+  createControllerState.set(selfPointer, {
     clientDataHash,
     pubKeyCredParams,
     residentKeyRequired,
-    excludeCredentialIds,
-  ]);
+    excludeCredentials,
+    onConfigurationError,
+  });
 }
 
 export function removeControllerState(self: NobjcObject) {
@@ -126,44 +133,47 @@ export const WebauthnCreateController = NobjcClass.define({
         );
 
         const selfPointer = getObjectPointerString(self);
-        if (context && createControllerState.has(selfPointer)) {
-          const [
+        const state = createControllerState.get(selfPointer);
+        if (context && state) {
+          const {
             clientDataHash,
             pubKeyCredParams,
             residentKeyRequired,
             excludeCredentials,
-          ] = createControllerState.get(selfPointer);
+            onConfigurationError,
+          } = state;
 
-          const platformOptions =
-            context.platformKeyCredentialCreationOptions();
-          if (platformOptions) {
-            applyCreateOptions(
-              platformOptions,
-              false,
-              clientDataHash,
-              pubKeyCredParams,
-              residentKeyRequired,
-              excludeCredentials
-            );
-          }
+          try {
+            const platformOptions =
+              context.platformKeyCredentialCreationOptions();
+            if (platformOptions) {
+              applyCreateOptions(
+                platformOptions,
+                false,
+                clientDataHash,
+                pubKeyCredParams,
+                residentKeyRequired,
+                excludeCredentials
+              );
+            }
 
-          // Mirror the injection on the security-key options. The setters are private selectors
-          // and are applied as a batch: if any of them is missing on this macOS, we let the
-          // error propagate (caught by the create handler -> NotAllowedError) rather than
-          // leaving the security-key request with a partial mutation — e.g. clientDataHash set
-          // but excludeCredentials dropped, which would let a user register an excluded
-          // credential on the security-key path. Fail-closed beats a silently insecure request.
-          const securityKeyOptions =
-            context.securityKeyCredentialCreationOptions();
-          if (securityKeyOptions) {
-            applyCreateOptions(
-              securityKeyOptions,
-              true,
-              clientDataHash,
-              pubKeyCredParams,
-              residentKeyRequired,
-              excludeCredentials
-            );
+            // Mirror the injection on the security-key options. These are private selectors,
+            // so the whole ceremony fails closed if this macOS version does not provide every
+            // setter rather than leaving a partially configured request active.
+            const securityKeyOptions =
+              context.securityKeyCredentialCreationOptions();
+            if (securityKeyOptions) {
+              applyCreateOptions(
+                securityKeyOptions,
+                true,
+                clientDataHash,
+                pubKeyCredParams,
+                residentKeyRequired,
+                excludeCredentials
+              );
+            }
+          } catch (error) {
+            onConfigurationError(error);
           }
         }
 

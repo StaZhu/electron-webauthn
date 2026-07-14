@@ -259,10 +259,7 @@ function getCredentialInternal(
   const { clientDataHash, clientDataBuffer } =
     generateClientDataInfo(clientData);
 
-  setClientDataHash(authController, clientDataHash);
-
   let isFinished = false;
-  let timedOut = false;
   let timeoutHandlerId: NodeJS.Timeout | null = null;
   const finished = (_success: boolean) => {
     isFinished = true;
@@ -273,6 +270,16 @@ function getCredentialInternal(
       timeoutHandlerId = null;
     }
   };
+  const failConfiguration = (error: unknown) => {
+    if (isFinished) return;
+    reject(error instanceof Error ? error : new Error(String(error)));
+    finished(false);
+    try {
+      authController.cancel();
+    } catch {}
+  };
+
+  setClientDataHash(authController, clientDataHash, failConfiguration);
 
   // Set allowed credentials if provided. Must be set on both requests - only setting it
   // on platformKeyRequest left the security-key request unrestricted, letting any resident
@@ -382,18 +389,12 @@ function getCredentialInternal(
       const jsError = new Error(errorMessage) as Error & {
         nativeCode?: number;
         nativeDomain?: string;
-        nativeTimeout?: boolean;
       };
       // NSError code/domain are not localized; attach for mapNativeAuthorizationError.
       try {
         jsError.nativeCode = error.code();
         jsError.nativeDomain = error.domain().UTF8String();
       } catch {}
-      // Flag a self-initiated timeout cancellation so the handler maps it to AbortError
-      // rather than NotAllowedError (a user-driven cancel stays NotAllowedError).
-      if (timedOut) {
-        jsError.nativeTimeout = true;
-      }
       reject(jsError);
       finished(false);
     },
@@ -408,14 +409,17 @@ function getCredentialInternal(
   authController.setPresentationContextProvider$(presentationContextProvider);
 
   // authController.performRequests()
-  authController.performRequests();
+  try {
+    authController.performRequests();
+  } catch (error) {
+    failConfiguration(error);
+  }
 
-  // Cancelling auth controller on timeout. Marking timedOut before cancel() lets the
-  // error delegate distinguish a self-initiated timeout (-> AbortError) from a user
-  // cancel (-> NotAllowedError), since both arrive through the same didCompleteWithError.
+  if (isFinished) return promise;
+
+  // A ceremony timeout and user cancellation both map to WebAuthn's NotAllowedError.
   timeoutHandlerId = setTimeout(() => {
     if (isFinished) return;
-    timedOut = true;
     authController.cancel();
   }, timeout);
 

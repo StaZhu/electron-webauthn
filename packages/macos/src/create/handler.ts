@@ -113,8 +113,7 @@ export async function createCredential(
     // 1 hour (max timeout)
     timeout = 60 * 60 * 1000;
   }
-  // Timeout is enforced inside createCredentialInternal; a self-initiated timeout surfaces
-  // as AbortError (see nativeTimeout flag), a user cancel as NotAllowedError.
+  // Timeout is enforced inside createCredentialInternal and surfaces as NotAllowedError.
 
   const challenge = bufferSourceToBuffer(publicKeyOptions.challenge);
   if (!challenge) {

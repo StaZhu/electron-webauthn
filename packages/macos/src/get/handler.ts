@@ -106,8 +106,7 @@ export async function getCredential(
     // 1 hour (max timeout)
     timeout = 60 * 60 * 1000;
   }
-  // Timeout is enforced inside getCredentialInternal; a self-initiated timeout surfaces
-  // as AbortError (see nativeTimeout flag), a user cancel as NotAllowedError.
+  // Timeout is enforced inside getCredentialInternal and surfaces as NotAllowedError.
 
   const challenge = bufferSourceToBuffer(publicKeyOptions.challenge);
   if (!challenge) {
@@ -168,11 +167,9 @@ export async function getCredential(
     }
   ).catch((error: Error) => {
     errorResult = error;
-    // get() has no InvalidStateError. A self-initiated timeout is AbortError; every other
-    // native failure (user cancel, no credentials, etc.) is NotAllowedError.
-    return (error as Error & { nativeTimeout?: boolean }).nativeTimeout
-      ? "AbortError"
-      : "NotAllowedError";
+    // get() has no InvalidStateError. Native failures, including ceremony timeout and
+    // user cancellation, surface as NotAllowedError.
+    return "NotAllowedError" as const;
   });
 
   // Handle the result

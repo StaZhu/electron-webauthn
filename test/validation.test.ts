@@ -79,39 +79,12 @@ describe("validation helpers", () => {
     expect(mapNativeAuthorizationError({})).toBe("NotAllowedError");
   });
 
-  test("mapNativeAuthorizationError maps nativeTimeout to AbortError", () => {
-    // A self-initiated timeout cancellation surfaces as AbortError regardless of the
-    // underlying NSError code (which is typically a cancel code that would otherwise
-    // map to NotAllowedError).
-    expect(mapNativeAuthorizationError({ nativeTimeout: true })).toBe(
-      "AbortError"
-    );
+  test("mapNativeAuthorizationError maps cancellation to NotAllowedError", () => {
     expect(
       mapNativeAuthorizationError({
-        nativeTimeout: true,
         nativeDomain: AUTHORIZATION_ERROR_DOMAIN,
         nativeCode: 1001,
       })
-    ).toBe("AbortError");
-    expect(
-      mapNativeAuthorizationError({
-        nativeTimeout: true,
-        message:
-          "The operation couldn't be completed. (com.apple.AuthenticationServices.AuthorizationError error 1001.)",
-      })
-    ).toBe("AbortError");
-  });
-
-  test("mapNativeAuthorizationError treats missing nativeTimeout as non-timeout", () => {
-    expect(mapNativeAuthorizationError({ nativeTimeout: false })).toBe(
-      "NotAllowedError"
-    );
-    expect(
-      mapNativeAuthorizationError({
-        nativeTimeout: false,
-        nativeDomain: AUTHORIZATION_ERROR_DOMAIN,
-        nativeCode: 1006,
-      })
-    ).toBe("InvalidStateError");
+    ).toBe("NotAllowedError");
   });
 });
